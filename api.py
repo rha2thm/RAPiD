@@ -39,7 +39,7 @@ class Detector():
         total_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
         print(f'Successfully initialized model {model_name}.',
             'Total number of trainable parameters:', total_params)
-        
+
         model.load_state_dict(torch.load(weights_path)['model'])
         print(f'Successfully loaded weights: {weights_path}')
         model.eval()
@@ -82,11 +82,11 @@ class Detector():
             plt.imshow(np_img)
             plt.show()
         return detections
-        
+
     def detect_imgSeq(self, img_dir, **kwargs):
         '''
         Run on a sequence of images in a folder.
-        
+
         Args:
             img_dir: str
             input_size: int, input resolution
@@ -112,7 +112,7 @@ class Detector():
                 detection_json.append(dt_dict)
 
         return detection_json
-    
+
     def _predict_pil(self, pil_img, **kwargs):
         '''
         Args:
