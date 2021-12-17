@@ -143,3 +143,12 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+# checkpoints and weights
+./weights/*.pt
+./weights/*.pth
+./weights/*.ckpt
+
+# datasets
+./images/COCO/
+
