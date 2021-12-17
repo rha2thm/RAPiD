@@ -145,10 +145,10 @@ dmypy.json
 .pyre/
 
 # checkpoints and weights
-./weights/*.pt
-./weights/*.pth
-./weights/*.ckpt
+weights/*.pt
+weights/*.pth
+weights/*.ckpt
 
 # datasets
-./images/COCO/
+images/COCO/
 
