@@ -1,5 +1,6 @@
 # This is the main training file we are using
 import os
+from pathlib import Path
 import argparse
 import random
 import torch
@@ -36,7 +37,7 @@ def parse_args():
 
 if __name__ == '__main__':
     args = parse_args()
-    assert torch.cuda.is_available() # Currently do not support CPU training
+    # assert torch.cuda.is_available() # Currently do not support CPU training
     # -------------------------- settings ---------------------------
     target_size = 1024 if args.high_resolution else 608
     initial_size = 1088 if args.high_resolution else 672
@@ -44,7 +45,7 @@ if __name__ == '__main__':
     # dataloader setting
     batch_size = args.batch_size
     num_cpu = 0 if batch_size == 1 else 4
-    subdivision = 128 // batch_size
+    subdivision = 128 // batch_size  # mini batch
     enable_aug = True
     multiscale = True
     multiscale_interval = 10
@@ -54,9 +55,9 @@ if __name__ == '__main__':
     # dataset setting
     print('initialing dataloader...')
     if args.dataset == 'COCO':
-        train_img_dir = '../Datasets/COCO/train2017'
+        train_img_dir = './images/COCO/train2017'
         assert 'COCO' in train_img_dir # issue #11
-        train_json = '../Datasets/COCO/annotations/instances_train2017.json'
+        train_json = './images/COCO/annotations/instances_train2017.json'
         val_img_dir = './images/tiny_val/one'
         val_json = './images/tiny_val/one.json'
         lr_SGD = 0.001 / batch_size / subdivision
@@ -181,7 +182,7 @@ if __name__ == '__main__':
         model = RAPiD(backbone=args.backbone, img_norm=False,
                        loss_angle='period_L2')
     
-    model = model.cuda()
+    model = model.cuda() if torch.cuda.is_available() else model.cpu()
 
     start_iter = -1
     if args.checkpoint:
@@ -192,8 +193,9 @@ if __name__ == '__main__':
         start_iter = state['iter']
 
     val_set = MWtools.MWeval(val_json, iou_method='rle')
-    eval_img_names = os.listdir('./images/')
-    eval_img_paths = [os.path.join('./images/',s) for s in eval_img_names]
+    # eval_img_names = os.listdir('./images/')
+    # eval_img_paths = [os.path.join('./images/',s) for s in eval_img_names]
+    eval_img_paths = [str(p) for p in sorted(Path('images').glob('*.jpg'))]
     logger = SummaryWriter(f'./logs/{job_name}')
 
     # optimizer setup
@@ -251,7 +253,7 @@ if __name__ == '__main__':
                 dataiterator = iter(dataloader)
                 imgs, targets, cats, _, _ = next(dataiterator)  # load a batch
             # visualization.imshow_tensor(imgs)
-            imgs = imgs.cuda()
+            imgs = imgs.cuda() if torch.cuda.is_available() else imgs.cpu()
             loss = model(imgs, targets, labels_cats=cats)
             loss.backward()
         optimizer.step()
@@ -268,9 +270,10 @@ if __name__ == '__main__':
             print(f'[Iteration {iter_i}] [learning rate {current_lr:.3g}]',
                   f'[Total loss {loss:.2f}] [img size {dataset.img_size}]')
             print(model.loss_str)
-            max_cuda = torch.cuda.max_memory_allocated(0) / 1024 / 1024 / 1024
-            print(f'Max GPU memory usage: {max_cuda} GigaBytes')
-            torch.cuda.reset_peak_memory_stats(0)
+            if torch.cuda.is_available():
+                max_cuda = torch.cuda.max_memory_allocated(0) / 1024 / 1024 / 1024
+                print(f'Max GPU memory usage: {max_cuda} GigaBytes')
+                torch.cuda.reset_peak_memory_stats(0)
 
         # random resizing
         if multiscale and iter_i > 0 and (iter_i % multiscale_interval == 0):
@@ -304,5 +307,5 @@ if __name__ == '__main__':
                 np_img = cv2.resize(np_img, (416,416))
                 # cv2.imwrite(f'./results/eval_imgs/{job_name}_{today}_{iter_i}.jpg', np_img)
                 logger.add_image(img_path, np_img, iter_i, dataformats='HWC')
-
+                
             model.train()

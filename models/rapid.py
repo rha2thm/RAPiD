@@ -40,6 +40,34 @@ class RAPiD(nn.Module):
             self.backbone = models.backbones.resnet50()
         elif backbone == 'res101':
             self.backbone = models.backbones.resnet101()
+        elif backbone == 'yolov5n':
+            print("Using backbone yolov5s. Loading COCO pre-trained weights...")
+            backbone_coco_path = './weights/yolov5n_backbone.pth'  # yolov5n6.pt / yolov5n6.pt / yolov5s.pt
+            backbone_yaml_path = './weights/yolov5n.yaml'
+            if os.path.exists(backbone_coco_path):
+                pretrained = torch.load(backbone_coco_path)
+                self.backbone = models.backbones.yolov5(backbone_yaml_path)
+                csd = pretrained  # checkpoint state_dict as FP32
+                csd = {k: v for k, v in csd.items() if k in self.backbone.state_dict() and v.shape == self.backbone.state_dict()[k].shape}  # intersect
+                self.backbone.load_state_dict(csd, strict=False)  # load
+                # torch.save(self.backbone.state_dict(), './weights/yolov5n_backbone.pth')
+            else:
+                print('Warning: no COCO-pretrained weights found.',
+                      'Please check https://github.com/ultralytics/yolov5/releases for it.')
+        elif backbone == 'yolov5s':
+            print("Using backbone yolov5s. Loading COCO pre-trained weights...")
+            backbone_coco_path = './weights/yolov5s_backbone.pth'  # yolov5n6.pt / yolov5n6.pt / yolov5s.pt
+            backbone_yaml_path = './weights/yolov5s.yaml'
+            if os.path.exists(backbone_coco_path):
+                pretrained = torch.load(backbone_coco_path)
+                self.backbone = models.backbones.yolov5(pretrained['model'].yaml)
+                csd = pretrained  # checkpoint state_dict as FP32
+                csd = {k: v for k, v in csd.items() if k in self.backbone.state_dict() and v.shape == self.backbone.state_dict()[k].shape}  # intersect
+                self.backbone.load_state_dict(csd, strict=False)  # load
+                # torch.save(self.backbone.state_dict(), './weights/yolov5s_backbone.pth')
+            else:
+                print('Warning: no COCO-pretrained weights found.',
+                      'Please check https://github.com/ultralytics/yolov5/releases for it.')
         else:
             raise Exception('Unknown backbone name')
         pnum = sum(p.numel() for p in self.backbone.parameters() if p.requires_grad)
@@ -51,6 +79,11 @@ class RAPiD(nn.Module):
             chS, chM, chL = 128, 256, 512
         elif backbone in {'res50','res101'}:
             chS, chM, chL = 512, 1024, 2048
+        elif backbone == 'yolov5n':
+            chS, chM, chL = 64, 64, 128
+        elif backbone == 'yolov5s':
+            chS, chM, chL = 128, 128, 256
+        
         self.branch_L = models.backbones.YOLOBranch(chL, 18)
         self.branch_M = models.backbones.YOLOBranch(chM, 18, prev_ch=(chL//2,chM//2))
         self.branch_S = models.backbones.YOLOBranch(chS, 18, prev_ch=(chM//2,chS//2))
@@ -65,7 +98,7 @@ class RAPiD(nn.Module):
         labels: a batch of ground truth
         '''
         assert x.dim() == 4
-        self.img_size = x.shape[2:4]
+        self.img_size = torch.tensor(x.shape[2:4])
 
         # go through backbone
         small, medium, large = self.backbone(x)
@@ -218,9 +251,9 @@ class PredLayer(nn.Module):
         ti_all = tx_all.long()
         tj_all = ty_all.long()
 
-        norm_anch_wh = anchors[:,0:2] / img_hw # normalized
+        norm_anch_wh = torch.div(anchors[:,0:2], img_hw) # normalized
         norm_anch_00wha = self.anch_00wha_all.clone().to(device=device)
-        norm_anch_00wha[:,2:4] /= img_hw # normalized
+        norm_anch_00wha[:,2:4] = torch.div(norm_anch_00wha[:,2:4], img_hw) # normalized
 
         # traverse all images in a batch
         valid_gt_num = 0
