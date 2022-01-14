@@ -154,3 +154,5 @@ images/COCO/
 
 # output video files
 *.mp4
+output_videos/
+

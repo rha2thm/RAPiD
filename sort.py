@@ -24,11 +24,14 @@ matplotlib.use('TkAgg')
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 from skimage import io
+from copy import deepcopy
 
 import glob
 import time
 import argparse
 from filterpy.kalman import KalmanFilter
+#  from filterpy.kalman import ExtendedKalmanFilter as EKF
+from filterpy.common import reshape_z
 
 from pycocotools import mask as cocomask
 
@@ -93,6 +96,8 @@ def xywha2vertex(xywha):
 
 def iou_rotation_batch(dt, gt):
     assert gt.shape[-1] == dt.shape[-1] == 6  # [x,y,w,h,a,score]
+    
+    dt, gt = dt.cpu().clone().detach(), gt.copy()
 
     if dt.shape[0] == 0 or gt.shape[0] == 0:
         #  print(f'gt:{gt.shape}, dt:{dt.shape}')
@@ -123,7 +128,7 @@ def convert_bbox_to_z(bbox, xywha=False):
         y = bbox[1]
         w = bbox[2]
         h = bbox[3]
-        a = bbox[4]
+        a = np.mod(bbox[4] + 90, 180) - 90
         s = w * h    #scale is just area
         r = w / float(h)
         z = np.array([x, y, s, a, r]).reshape((5, 1))
@@ -159,6 +164,63 @@ def convert_x_to_bbox(x,xywha=False,score=None):
             return np.array([x[0]-w/2.,x[1]-h/2.,x[0]+w/2.,x[1]+h/2.,score]).reshape((1,5))
 
 
+class EKF(KalmanFilter):
+    def update(self, z, R=None, H=None):
+        # set to None to force recompute
+        self._log_likelihood = None
+        self._likelihood = None
+        self._mahalanobis = None
+
+        if z is None:
+            self.z = np.array([[None]*self.dim_z]).T
+            self.x_post = self.x.copy()
+            self.P_post = self.P.copy()
+            self.y = np.zeros((self.dim_z, 1))
+            return
+
+        if R is None:
+            R = self.R
+        elif np.isscalar(R):
+            R = np.eye(self.dim_z) * R
+
+        if H is None:
+            z = reshape_z(z, self.dim_z, self.x.ndim)
+            H = self.H
+
+        # y = z - Hx
+        # error (residual) between measurement and prediction
+        self.y = z - np.dot(H, self.x)
+        self.y[3] = np.mod(self.y[3] + 180, 360) - 180
+
+        # common subexpression for speed
+        PHT = np.dot(self.P, H.T)
+
+        # S = HPH' + R
+        # project system uncertainty into measurement space
+        self.S = np.dot(H, PHT) + R
+        self.SI = self.inv(self.S)
+        # K = PH'inv(S)
+        # map system uncertainty into kalman gain
+        self.K = np.dot(PHT, self.SI)
+
+        # x = x + Ky
+        # predict new x with residual scaled by the kalman gain
+        self.x = self.x + np.dot(self.K, self.y)
+
+        # P = (I-KH)P(I-KH)' + KRK'
+        # This is more numerically stable
+        # and works for non-optimal K vs the equation
+        # P = (I-KH)P usually seen in the literature.
+
+        I_KH = self._I - np.dot(self.K, H)
+        self.P = np.dot(np.dot(I_KH, self.P), I_KH.T) + np.dot(np.dot(self.K, R), self.K.T)
+
+        # save measurement and posterior state
+        self.z = deepcopy(z)
+        self.x_post = self.x.copy()
+        self.P_post = self.P.copy()
+                
+
 class KalmanBoxTracker(object):
   """
   This class represents the internal state of individual tracked objects observed as bbox.
@@ -173,21 +235,22 @@ class KalmanBoxTracker(object):
     """
     if rotation:
         #define constant velocity model
-        self.kf = KalmanFilter(dim_x=9, dim_z=5) 
-        self.kf.F = np.array([[1,0,0,0,0,1,0,0,0],[0,1,0,0,0,0,1,0,0],[0,0,1,0,0,0,0,1,0],[0,0,0,1,0,0,0,0,1],[0,0,0,0,1,0,0,0,0],
+        self.ekf = EKF(dim_x=9, dim_z=5, dim_u=4) 
+        self.ekf.F = np.array([[1,0,0,0,0,1,0,0,0],[0,1,0,0,0,0,1,0,0],[0,0,1,0,0,0,0,1,0],[0,0,0,1,0,0,0,0,1],[0,0,0,0,1,0,0,0,0],
                               [0,0,0,0,0,1,0,0,0],[0,0,0,0,0,0,1,0,0],[0,0,0,0,0,0,0,1,0],[0,0,0,0,0,0,0,0,1]])
-        self.kf.H = np.array([[1,0,0,0,0,0,0,0,0],[0,1,0,0,0,0,0,0,0],[0,0,1,0,0,0,0,0,0],[0,0,0,1,0,0,0,0,0],[0,0,0,0,1,0,0,0,0]])
+        self.ekf.H = np.array([[1,0,0,0,0,0,0,0,0],[0,1,0,0,0,0,0,0,0],[0,0,1,0,0,0,0,0,0],[0,0,0,1,0,0,0,0,0],[0,0,0,0,1,0,0,0,0]])
 
-        self.kf.R[2:,2:] *= 10.
-        self.kf.P[5:,5:] *= 1000. #give high uncertainty to the unobservable initial velocities
-        self.kf.P *= 10.
-        self.kf.Q[-1,-1] *= 0.01
-        self.kf.Q[5:,5:] *= 0.01
-        self.kf.x[:5] = convert_bbox_to_z(bbox, rotation)
+        self.ekf.R[2:,2:] *= 10.
+        self.ekf.P[5:,5:] *= 1000. #give high uncertainty to the unobservable initial velocities
+        self.ekf.P *= 10.
+        self.ekf.Q[-1,-1] *= 0.01
+        self.ekf.Q[5:,5:] *= 0.01
+        self.ekf.x[:5] = convert_bbox_to_z(bbox, xywha=True)
     else:
         #define constant velocity model
         self.kf = KalmanFilter(dim_x=7, dim_z=4) 
-        self.kf.F = np.array([[1,0,0,0,1,0,0],[0,1,0,0,0,1,0],[0,0,1,0,0,0,1],[0,0,0,1,0,0,0],[0,0,0,0,1,0,0],[0,0,0,0,0,1,0],[0,0,0,0,0,0,1]])
+        self.kf.F = np.array([[1,0,0,0,1,0,0],[0,1,0,0,0,1,0],[0,0,1,0,0,0,1],[0,0,0,1,0,0,0],  # x, y, s, r
+                              [0,0,0,0,1,0,0],[0,0,0,0,0,1,0],[0,0,0,0,0,0,1]])  # v_x, v_y, v_s
         self.kf.H = np.array([[1,0,0,0,0,0,0],[0,1,0,0,0,0,0],[0,0,1,0,0,0,0],[0,0,0,1,0,0,0]])
 
         self.kf.R[2:,2:] *= 10.
@@ -195,7 +258,7 @@ class KalmanBoxTracker(object):
         self.kf.P *= 10.
         self.kf.Q[-1,-1] *= 0.01
         self.kf.Q[4:,4:] *= 0.01
-        self.kf.x[:4] = convert_bbox_to_z(bbox, rotation)
+        self.kf.x[:4] = convert_bbox_to_z(bbox, xywha=False)
 
     self.rotation = rotation
     self.time_since_update = 0
@@ -214,31 +277,38 @@ class KalmanBoxTracker(object):
     self.history = []
     self.hits += 1
     self.hit_streak += 1
-    self.kf.update(convert_bbox_to_z(bbox, self.rotation))
+    z = convert_bbox_to_z(bbox, self.rotation) 
+    if self.rotation:
+        self.ekf.update(z=z)
+    else:
+        self.kf.update(z=z)
 
   def predict(self):
     """
     Advances the state vector and returns the predicted bounding box estimate.
     """
     if self.rotation:
-        if (self.kf.x[7]+self.kf.x[2])<=0:
-            self.kf.x[6] *= 0.0
+        if (self.ekf.x[7]+self.ekf.x[2])<=0:
+            self.ekf.x[6] *= 0.0
+        self.ekf.predict()
+        self.history.append(convert_x_to_bbox(self.ekf.x, xywha=True))
     else:
         if((self.kf.x[6]+self.kf.x[2])<=0):
              self.kf.x[6] *= 0.0
-    self.kf.predict()
+        self.kf.predict()
+        self.history.append(convert_x_to_bbox(self.kf.x, xywha=False))
     self.age += 1
     if(self.time_since_update>0):
         self.hit_streak = 0
     self.time_since_update += 1
-    self.history.append(convert_x_to_bbox(self.kf.x, xywha=self.rotation))
     return self.history[-1]
 
   def get_state(self):
     """
     Returns the current bounding box estimate.
     """
-    return convert_x_to_bbox(self.kf.x, xywha=self.rotation)
+    bbox = convert_x_to_bbox(self.ekf.x, xywha=True) if self.rotation else convert_x_to_bbox(self.kf.x, xywha=False)
+    return bbox
 
 
 def associate_detections_to_trackers(detections,trackers,iou_threshold = 0.3, rotation=False):

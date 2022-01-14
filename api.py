@@ -121,10 +121,10 @@ class Detector():
     def _detect_iter(self, iterator, **kwargs):
         detection_json = []
         if kwargs.get('save_video',False):
-            filename = str(Path(iterator.video_path).stem)
-            print(f'writing ./bbox_{filename}.mp4 (fps:{iterator.fps}, size:({iterator.frame_w}, {iterator.frame_h}))')
+            filename = f'./output_videos/bbox_{str(Path(iterator.video_path).stem)}.mp4'
+            print(f'writing {filename} (fps:{iterator.fps}, size:({iterator.frame_w}, {iterator.frame_h}))')
             fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-            out = cv2.VideoWriter('./output.mp4', fourcc, iterator.fps, (iterator.frame_w, iterator.frame_h))
+            out = cv2.VideoWriter(filename, fourcc, iterator.fps, (iterator.frame_w, iterator.frame_h))
 
         if kwargs.get('sort', False):
             tracker = Sort(rotation=True)

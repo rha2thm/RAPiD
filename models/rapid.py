@@ -41,7 +41,7 @@ class RAPiD(nn.Module):
         elif backbone == 'res101':
             self.backbone = models.backbones.resnet101()
         elif backbone == 'yolov5n':
-            print("Using backbone yolov5s. Loading COCO pre-trained weights...")
+            print("Using backbone yolov5n. Loading COCO pre-trained weights...")
             backbone_coco_path = './weights/yolov5n_backbone.pth'  # yolov5n6.pt / yolov5n6.pt / yolov5s.pt
             backbone_yaml_path = './weights/yolov5n.yaml'
             if os.path.exists(backbone_coco_path):
