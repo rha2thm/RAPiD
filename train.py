@@ -58,8 +58,8 @@ if __name__ == '__main__':
         train_img_dir = './images/COCO/train2017'
         assert 'COCO' in train_img_dir # issue #11
         train_json = './images/COCO/annotations/instances_train2017.json'
-        val_img_dir = './images/tiny_val/one'
-        val_json = './images/tiny_val/one.json'
+        val_img_dir = './images/COCO/val2017'
+        val_json = './images/COCO/annotations/instances_val2017.json'
         lr_SGD = 0.001 / batch_size / subdivision
         # Learning rate setup
         def burnin_schedule(i):

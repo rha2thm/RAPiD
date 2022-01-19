@@ -1,7 +1,7 @@
 #!/bin/bash
 
 python train.py --model rapid_pL1 \
-                --backbone yolov5n \
+                --backbone yolov5x \
                 --dataset COCO \
                 --batch_size 8 \
                 --eval_interval 20 \
