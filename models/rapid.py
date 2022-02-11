@@ -69,6 +69,19 @@ class RAPiD(nn.Module):
             else:
                 print('Warning: no COCO-pretrained weights found.',
                       'Please check https://github.com/ultralytics/yolov5/releases for it.')
+        elif backbone == 'yolov5m':
+            print("Using backbone yolov5m. Loading COCO pre-trained weights...")
+            backbone_coco_path = './weights/yolov5m_backbone.pth'  # yolov5n6.pt / yolov5n6.pt / yolov5s.pt
+            if os.path.exists(backbone_coco_path):
+                pretrained = torch.load(backbone_coco_path)
+                self.backbone = models.backbones.yolov5(pretrained.yaml)
+                csd = pretrained.state_dict()  # checkpoint state_dict as FP32
+                csd = {k: v for k, v in csd.items() if k in self.backbone.state_dict() and v.shape == self.backbone.state_dict()[k].shape}  # intersect
+                self.backbone.load_state_dict(csd, strict=False)  # load
+                #  torch.save(self.backbone, './weights/yolov5m_backbone.pth')
+            else:
+                print('Warning: no COCO-pretrained weights found.',
+                      'Please check https://github.com/ultralytics/yolov5/releases for it.')
         elif backbone == 'yolov5x':
             print("Using backbone yolov5x6. Loading COCO pre-trained weights...")
             backbone_coco_path = './weights/yolov5x_backbone.pth'
@@ -93,7 +106,7 @@ class RAPiD(nn.Module):
             chS, chM, chL = 128, 256, 512
         elif backbone in {'res50','res101'}:
             chS, chM, chL = 512, 1024, 2048
-        elif backbone in {'yolov5n', 'yolov5s', 'yolov5x'}:
+        elif backbone in {'yolov5n', 'yolov5s', 'yolov5m', 'yolov5x'}:
             chS, chM, chL = np.array(np.ceil(np.array((256, 512, 1024)) * pretrained.yaml['width_multiple'] /8)*8, dtype=np.int32)
         
         
