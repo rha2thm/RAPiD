@@ -20,7 +20,7 @@ from __future__ import print_function
 import os
 import numpy as np
 import matplotlib
-matplotlib.use('TkAgg')
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 from skimage import io
@@ -112,7 +112,7 @@ def iou_rotation_batch(dt, gt):
     
     vertex_gt = cocomask.frPyObjects(vertex_gt, 1024, 1024)
     vertex_dt = cocomask.frPyObjects(vertex_dt, 1024, 1024)
-    ious = cocomask.iou(vertex_dt, vertex_gt, [0 for _ in vertex_dt])
+    ious = cocomask.iou(vertex_dt, vertex_gt, [0 for _ in vertex_gt])
 
     return ious
 
@@ -126,7 +126,7 @@ def convert_bbox_to_z(bbox, xywha=False):
     if xywha:
         x = bbox[0]
         y = bbox[1]
-        w = bbox[2]
+        w = bbox[2]  # w < h
         h = bbox[3]
         a = np.mod(bbox[4] + 90, 180) - 90
         s = w * h    #scale is just area
@@ -190,7 +190,7 @@ class EKF(KalmanFilter):
         # y = z - Hx
         # error (residual) between measurement and prediction
         self.y = z - np.dot(H, self.x)
-        self.y[3] = np.mod(self.y[3] + 180, 360) - 180
+        self.y[3] = np.mod(self.y[3] + 90, 180) - 90
 
         # common subexpression for speed
         PHT = np.dot(self.P, H.T)
